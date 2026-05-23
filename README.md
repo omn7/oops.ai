@@ -1,5 +1,8 @@
 # Oops - AI Code Review & DevSecOps CLI 🚨
-<img width="677" height="369" alt="oops ai" src="https://github.com/user-attachments/assets/828f8609-b593-47dc-9d67-352e0b1706a3" />
+
+<p align="center">
+  <img src="logo.png" alt="Oops.ai Logo" width="500">
+</p>
 
 
 [![NPM Version](https://img.shields.io/npm/v/oops-sec-cli.svg)](https://www.npmjs.com/package/oops-sec-cli)
