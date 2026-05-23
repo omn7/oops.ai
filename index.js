@@ -111,6 +111,77 @@ function runLocalScan(diff) {
     }
 }
 
+function walkDir(dir, fileList = []) {
+    const files = fs.readdirSync(dir);
+    for (const file of files) {
+        const filePath = path.join(dir, file);
+        if (fs.statSync(filePath).isDirectory()) {
+            if (!['node_modules', '.git', 'dist', 'build', '.next', 'coverage'].includes(file)) {
+                walkDir(filePath, fileList);
+            }
+        } else {
+            // Only scan code files
+            if (/\.(js|ts|jsx|tsx|py|go|java|php|rb|env|json)$/i.test(file)) {
+                fileList.push(filePath);
+            }
+        }
+    }
+    return fileList;
+}
+
+function runDeepProjectScan() {
+    const spinner = ora({ text: tealGradient('Running Deep Offline Static Analysis...'), color: 'cyan' }).start();
+    const files = walkDir(process.cwd());
+    let issuesFound = [];
+
+    const rules = [
+        { name: 'Exposed Stripe Secret', regex: /sk_live_[0-9a-zA-Z]{24}/, type: 'Secret' },
+        { name: 'Exposed OpenAI Key', regex: /sk-[a-zA-Z0-9]{48}/, type: 'Secret' },
+        { name: 'Exposed AWS Key', regex: /AKIA[0-9A-Z]{16}/, type: 'Secret' },
+        { name: 'Hardcoded Password / Secret', regex: /(?:password|secret|token)\s*[:=]\s*['"][^'"]{5,}['"]/i, type: 'Secret' },
+        { name: 'Potentially Unprotected Admin Route', regex: /app\.(?:post|put|delete|get)\(['"]\/admin[^'"]*['"]\s*,\s*(?:async\s+)?(?:\([^)]*\)|req)\s*=>/i, type: 'Security' }
+    ];
+
+    for (const file of files) {
+        try {
+            const content = fs.readFileSync(file, 'utf8');
+            const lines = content.split('\n');
+            
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                for (const rule of rules) {
+                    if (rule.regex.test(line)) {
+                        issuesFound.push({ file: path.relative(process.cwd(), file), line: i + 1, issue: rule.name, type: rule.type });
+                    }
+                }
+            }
+            
+            // File-level heuristic checks
+            if (content.includes('await ') && !content.includes('try {') && !content.includes('.catch(')) {
+                issuesFound.push({ file: path.relative(process.cwd(), file), line: '?', issue: 'Missing Error Handling (await without try/catch)', type: 'Reliability' });
+            }
+            if (/(for|while)\s*\(.*\)[\s\S]{0,150}(db\.|prisma\.|mongoose\.)/.test(content)) {
+                 issuesFound.push({ file: path.relative(process.cwd(), file), line: '?', issue: 'Database Query inside Loop (Potential Connection Exhaustion)', type: 'Performance/DoS' });
+            }
+        } catch (e) {
+            // Ignore unreadable files
+        }
+    }
+
+    spinner.stop();
+
+    if (issuesFound.length > 0) {
+        console.log(chalk.red.bold(`\n🚨 Deep Scan Completed: Found ${issuesFound.length} Potential Issues!\n`));
+        issuesFound.forEach((issue, index) => {
+            console.log(chalk.yellow(`${index + 1}. [${issue.type}] `) + chalk.white(`${issue.issue}`));
+            console.log(chalk.gray(`   File: ${issue.file}:${issue.line}\n`));
+        });
+        console.log(chalk.cyan('Recommendation: Please review the files above and apply necessary fixes.\n'));
+    } else {
+        console.log(chalk.green('\n✓ Deep Scan Passed. No obvious static vulnerabilities found.\n'));
+    }
+}
+
 async function runApiReview(diff, config) {
     if (!config.apiKey) {
         console.log(chalk.yellow(`⚠️  ${config.apiProvider || 'API'} Key is not set! Run "oops start" to configure it.`));
@@ -385,16 +456,18 @@ async function showMainMenu() {
         if (config.isSetup) {
             choices = [
                 { name: `1. Run Manual Code Review (${config.llmType === 'local' ? 'Local LLM' : (config.apiProvider ? config.apiProvider.toUpperCase() : 'API')})`, value: 'review' },
-                { name: '2. Reconfigure AI Settings', value: 'reconfigure' },
-                { name: '3. /help', value: 'help' },
-                { name: '4. Exit', value: 'exit' }
+                { name: '2. Run Deep Project Scan (Offline / No AI)', value: 'deep_scan' },
+                { name: '3. Reconfigure AI Settings', value: 'reconfigure' },
+                { name: '4. /help', value: 'help' },
+                { name: '5. Exit', value: 'exit' }
             ];
         } else {
             choices = [
                 { name: '1. Setup Local LLM', value: 'local' },
                 { name: '2. Setup Cloud AI API (OpenAI, Anthropic, Gemini)', value: 'api' },
-                { name: '3. /help', value: 'help' },
-                { name: '4. Exit', value: 'exit' }
+                { name: '3. Run Deep Project Scan (Offline / No AI)', value: 'deep_scan' },
+                { name: '4. /help', value: 'help' },
+                { name: '5. Exit', value: 'exit' }
             ];
         }
 
@@ -501,6 +574,8 @@ async function showMainMenu() {
         } else if (choice === 'review') {
             const reviewed = await executeManualReview(config);
             if (reviewed) exit = true;
+        } else if (choice === 'deep_scan') {
+            runDeepProjectScan();
         } else if (choice === 'help') {
              console.log(tealGradient('\n━━━━━━━━━ Oops Help ━━━━━━━━━'));
              console.log(chalk.white('Oops is an AI Code Review Assistant that prevents you from pushing bad code.'));
@@ -523,6 +598,8 @@ async function main() {
 
     if (command === '--pre-commit') {
         await runPreCommitHook();
+    } else if (command === 'scan') {
+        runDeepProjectScan();
     } else if (command === 'start') {
         printHeader();
         await showMainMenu();
