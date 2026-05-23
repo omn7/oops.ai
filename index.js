@@ -138,6 +138,10 @@ async function runDeepProjectScan(config) {
     const files = walkDir(process.cwd());
     let issuesFound = [];
 
+    const isNextJs = fs.existsSync(path.join(process.cwd(), 'next.config.js')) || fs.existsSync(path.join(process.cwd(), 'next.config.mjs'));
+    const isReact = fs.existsSync(path.join(process.cwd(), 'package.json')) && fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8').includes('"react"');
+    const isPython = fs.existsSync(path.join(process.cwd(), 'requirements.txt')) || fs.existsSync(path.join(process.cwd(), 'Pipfile'));
+
     const rules = [
         { name: 'Exposed Stripe Secret', regex: /sk_live_[0-9a-zA-Z]{24}/, type: 'Secret' },
         { name: 'Exposed OpenAI Key', regex: /sk-[a-zA-Z0-9]{48}/, type: 'Secret' },
@@ -145,6 +149,16 @@ async function runDeepProjectScan(config) {
         { name: 'Hardcoded Password / Secret', regex: /(?:password|secret|token)\s*[:=]\s*['"][^'"]{5,}['"]/i, type: 'Secret' },
         { name: 'Potentially Unprotected Admin Route', regex: /app\.(?:post|put|delete|get)\(['"]\/admin[^'"]*['"]\s*,\s*(?:async\s+)?(?:\([^)]*\)|req)\s*=>/i, type: 'Security' }
     ];
+
+    if (isNextJs) {
+        rules.push({ name: 'Exposed NEXT_PUBLIC Secret', regex: /NEXT_PUBLIC_.*(?:SECRET|PASSWORD|KEY|TOKEN)/i, type: 'Secret' });
+    }
+    if (isReact) {
+        rules.push({ name: 'React Component Hardcoded Secret', regex: /const\s+(?:API_KEY|SECRET)\s*=\s*['"][A-Za-z0-9_-]{15,}['"]/i, type: 'Secret' });
+    }
+    if (isPython) {
+        rules.push({ name: 'Django Secret Key Leak', regex: /SECRET_KEY\s*=\s*['"][^'"]+['"]/i, type: 'Secret' });
+    }
 
     for (const file of files) {
         try {
@@ -205,7 +219,19 @@ async function executeHybridAIReview(files, config) {
     if (!combinedContent.trim()) return;
 
     const spinner = ora({ text: tealGradient('AI is deeply analyzing flagged files...'), color: 'cyan' }).start();
-    const prompt = `You are an expert AI code reviewer. The local static scanner flagged the following files for potential vulnerabilities (e.g. secrets, missing try/catch, DB loops, open admin routes). Please perform a deep architectural review and provide fixes for these specific files:\n\n${combinedContent}`;
+    const prompt = `You are an expert AI code reviewer. The local static scanner flagged the following files for potential vulnerabilities. Please perform a deep architectural review and provide fixes for these specific files.
+CRITICAL INSTRUCTION: You MUST return a strict JSON response in EXACTLY this format, and absolutely nothing else. Do not use markdown blocks, just raw JSON:
+{
+  "fixes": [
+    {
+      "file": "relative/path/to/file",
+      "content": "the FULL ENTIRE replaced content of the file with the vulnerabilities fixed"
+    }
+  ]
+}
+
+Files to fix:
+${combinedContent}`;
 
     try {
         let fixContent = '';
@@ -264,19 +290,39 @@ async function executeHybridAIReview(files, config) {
         
         spinner.stop();
 
-        // Create a unique filename for the output
-        let counter = 1;
-        let filename = 'oops-deep-fix.txt';
-        while (fs.existsSync(path.join(process.cwd(), filename))) {
-            filename = `oops-deep-fix-${counter}.txt`;
-            counter++;
+        let jsonResponse;
+        try {
+            // Strip any potential markdown blocks like ```json ... ```
+            const cleanJson = fixContent.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
+            jsonResponse = JSON.parse(cleanJson);
+        } catch (e) {
+            console.error(chalk.yellow('⚠️ AI did not return a valid JSON object. Saving raw output instead.'));
+            fs.writeFileSync(path.join(process.cwd(), 'oops-deep-fix.txt'), fixContent, 'utf8');
+            console.log(chalk.gray(`Saved to oops-deep-fix.txt\n`));
+            return;
         }
 
-        const outPath = path.join(process.cwd(), filename);
-        fs.writeFileSync(outPath, fixContent, 'utf8');
+        if (!jsonResponse || !jsonResponse.fixes || jsonResponse.fixes.length === 0) {
+            console.log(chalk.green('✓ AI Review Complete. No immediate auto-fixes required.\n'));
+            return;
+        }
 
-        console.log(chalk.green(`\n✓ Deep AI Review Complete! Report saved to `) + chalk.cyan.bold(filename));
-        console.log(chalk.gray(`You can open this file to review the detailed fixes.\n`));
+        const autoApply = await confirm({ message: chalk.bold.magenta(`\n✨ AI generated fixes for ${jsonResponse.fixes.length} files! Do you want Oops to Auto-Heal them now?`) });
+
+        if (autoApply) {
+            for (const fix of jsonResponse.fixes) {
+                const targetPath = path.resolve(process.cwd(), fix.file);
+                if (fs.existsSync(targetPath)) {
+                    fs.writeFileSync(targetPath, fix.content, 'utf8');
+                    console.log(chalk.green(`✓ Auto-Healed: `) + chalk.white(fix.file));
+                } else {
+                    console.log(chalk.red(`✗ Could not find file to heal: `) + chalk.white(fix.file));
+                }
+            }
+            console.log(chalk.bold.cyan('\n🚀 Auto-Heal Complete! Your codebase is now secure.\n'));
+        } else {
+            console.log(chalk.gray('Auto-Heal cancelled. No files were modified.\n'));
+        }
 
     } catch (e) {
         spinner.fail(chalk.red('Failed to generate deep AI fix.'));
@@ -562,8 +608,9 @@ async function showMainMenu() {
                 { name: '2. Run Full Project Scan (Offline + AI Auto-Fix)', value: 'deep_scan' },
                 { name: '3. Reconfigure AI Settings', value: 'reconfigure' },
                 { name: '4. Check for Updates', value: 'update' },
-                { name: '5. /help', value: 'help' },
-                { name: '6. Exit', value: 'exit' }
+                { name: '5. Generate CI/CD Pipeline', value: 'ci' },
+                { name: '6. /help', value: 'help' },
+                { name: '7. Exit', value: 'exit' }
             ];
         } else {
             choices = [
@@ -571,8 +618,9 @@ async function showMainMenu() {
                 { name: '2. Setup Cloud AI API (OpenAI, Anthropic, Gemini)', value: 'api' },
                 { name: '3. Run Full Project Scan (Offline + AI Auto-Fix)', value: 'deep_scan' },
                 { name: '4. Check for Updates', value: 'update' },
-                { name: '5. /help', value: 'help' },
-                { name: '6. Exit', value: 'exit' }
+                { name: '5. Generate CI/CD Pipeline', value: 'ci' },
+                { name: '6. /help', value: 'help' },
+                { name: '7. Exit', value: 'exit' }
             ];
         }
 
@@ -683,6 +731,8 @@ async function showMainMenu() {
             await runDeepProjectScan(config);
         } else if (choice === 'update') {
             updateOops();
+        } else if (choice === 'ci') {
+            generateCiCdPipeline();
         } else if (choice === 'help') {
              console.log(tealGradient('\n━━━━━━━━━ Oops Help ━━━━━━━━━'));
              console.log(chalk.white('Oops is an AI Code Review Assistant that prevents you from pushing bad code.'));
@@ -727,6 +777,44 @@ function updateOops() {
     }
 }
 
+function generateCiCdPipeline() {
+    const workflowsDir = path.join(process.cwd(), '.github', 'workflows');
+    if (!fs.existsSync(workflowsDir)) {
+        fs.mkdirSync(workflowsDir, { recursive: true });
+    }
+    
+    const ymlContent = `name: Oops Security Scan
+
+on:
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  oops-security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install Oops AI
+        run: npm install -g https://github.com/omn7/oops.ai.git
+
+      - name: Run Deep Project Scan
+        run: oops scan
+`;
+    
+    const targetFile = path.join(workflowsDir, 'oops-security.yml');
+    fs.writeFileSync(targetFile, ymlContent, 'utf8');
+    
+    console.log(chalk.green(`\n✓ CI/CD Pipeline successfully generated at `) + chalk.cyan('.github/workflows/oops-security.yml'));
+    console.log(chalk.white(`Whenever someone opens a Pull Request, Oops will automatically scan the project!\n`));
+}
+
 async function main() {
     const args = process.argv.slice(2);
     const command = args[0];
@@ -738,6 +826,8 @@ async function main() {
         await runDeepProjectScan(config);
     } else if (command === 'update') {
         updateOops();
+    } else if (command === 'setup-ci') {
+        generateCiCdPipeline();
     } else if (command === 'start') {
         printHeader();
         await showMainMenu();
