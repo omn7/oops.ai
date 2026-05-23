@@ -26,7 +26,8 @@ function loadConfig() {
 function getDefaultConfig() {
     return { 
         isSetup: false,
-        llmType: 'gemini', 
+        llmType: 'api',
+        apiProvider: 'gemini',
         modelName: 'gemini-2.5-flash', 
         apiKey: '', 
         localUrl: 'http://127.0.0.1:11434/api/generate', 
@@ -107,29 +108,62 @@ function runLocalScan(diff) {
     }
 }
 
-async function runGeminiReview(diff, apiKey) {
-    if (!apiKey) {
-        console.log(chalk.yellow('⚠️  Gemini API Key is not set! Run "oops start" to configure it.'));
+async function runApiReview(diff, config) {
+    if (!config.apiKey) {
+        console.log(chalk.yellow(`⚠️  ${config.apiProvider || 'API'} Key is not set! Run "oops start" to configure it.`));
         process.exit(1);
     }
 
-    const ai = new GoogleGenAI({ apiKey });
+    const providerName = config.apiProvider ? config.apiProvider.charAt(0).toUpperCase() + config.apiProvider.slice(1) : 'API';
     const spinner = ora({
-        text: tealGradient('Analyzing diff with Gemini...'),
+        text: tealGradient(`Analyzing diff with ${providerName}...`),
         color: 'cyan'
     }).start();
 
     try {
         const prompt = `Review the following git diff for logical security flaws (e.g. SQL injection, exposed internal paths, bad architecture). Be incredibly concise. If it looks secure, just reply "Looks good". If there are issues, list them briefly.\n\n${diff}`;
-        
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-        });
+        let text = '';
+
+        if (config.apiProvider === 'gemini' || config.llmType === 'gemini') {
+            const ai = new GoogleGenAI({ apiKey: config.apiKey });
+            const response = await ai.models.generateContent({
+                model: config.modelName || 'gemini-2.5-flash',
+                contents: prompt,
+            });
+            text = response.text;
+        } else if (config.apiProvider === 'openai') {
+            const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
+                body: JSON.stringify({
+                    model: config.modelName || 'gpt-4o',
+                    messages: [{ role: 'user', content: prompt }]
+                })
+            });
+            if (!response.ok) throw new Error(`OpenAI HTTP error: ${response.status}`);
+            const data = await response.json();
+            text = data.choices[0].message.content;
+        } else if (config.apiProvider === 'anthropic') {
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json', 
+                    'x-api-key': config.apiKey, 
+                    'anthropic-version': '2023-06-01' 
+                },
+                body: JSON.stringify({
+                    model: config.modelName || 'claude-3-5-sonnet-latest',
+                    max_tokens: 1024,
+                    messages: [{ role: 'user', content: prompt }]
+                })
+            });
+            if (!response.ok) throw new Error(`Anthropic HTTP error: ${response.status}`);
+            const data = await response.json();
+            text = data.content[0].text;
+        }
 
         spinner.stop();
 
-        const text = response.text;
         if (text.toLowerCase().includes('looks good') && text.length < 50) {
              console.log(chalk.green('✓ AI Review: Passed. Code looks secure.'));
              return { passed: true, feedback: text };
@@ -195,13 +229,44 @@ async function generateFix(diff, feedback, config) {
 
     try {
         let fixContent = '';
-        if (config.llmType === 'gemini') {
-            const ai = new GoogleGenAI({ apiKey: config.apiKey });
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: prompt,
-            });
-            fixContent = response.text;
+        if (config.llmType === 'api' || config.llmType === 'gemini') {
+            if (config.apiProvider === 'gemini' || config.llmType === 'gemini') {
+                const ai = new GoogleGenAI({ apiKey: config.apiKey });
+                const response = await ai.models.generateContent({
+                    model: config.modelName || 'gemini-2.5-flash',
+                    contents: prompt,
+                });
+                fixContent = response.text;
+            } else if (config.apiProvider === 'openai') {
+                const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
+                    body: JSON.stringify({
+                        model: config.modelName || 'gpt-4o',
+                        messages: [{ role: 'user', content: prompt }]
+                    })
+                });
+                if (!response.ok) throw new Error(`OpenAI HTTP error: ${response.status}`);
+                const data = await response.json();
+                fixContent = data.choices[0].message.content;
+            } else if (config.apiProvider === 'anthropic') {
+                const response = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json', 
+                        'x-api-key': config.apiKey, 
+                        'anthropic-version': '2023-06-01' 
+                    },
+                    body: JSON.stringify({
+                        model: config.modelName || 'claude-3-5-sonnet-latest',
+                        max_tokens: 2048,
+                        messages: [{ role: 'user', content: prompt }]
+                    })
+                });
+                if (!response.ok) throw new Error(`Anthropic HTTP error: ${response.status}`);
+                const data = await response.json();
+                fixContent = data.content[0].text;
+            }
         } else {
             const response = await fetch(config.localUrl, {
                 method: 'POST',
@@ -240,8 +305,8 @@ async function generateFix(diff, feedback, config) {
 }
 
 async function runReview(diff, config) {
-    if (config.llmType === 'gemini') {
-        return await runGeminiReview(diff, config.apiKey);
+    if (config.llmType === 'api' || config.llmType === 'gemini') {
+        return await runApiReview(diff, config);
     } else {
         return await runOllamaReview(diff, config.localUrl, config.localModel);
     }
@@ -316,7 +381,7 @@ async function showMainMenu() {
         // If the user has already set up the AI, change the menu options
         if (config.isSetup) {
             choices = [
-                { name: `1. Run Manual Code Review (${config.llmType === 'gemini' ? 'Gemini' : 'Local LLM'})`, value: 'review' },
+                { name: `1. Run Manual Code Review (${config.llmType === 'local' ? 'Local LLM' : (config.apiProvider ? config.apiProvider.toUpperCase() : 'API')})`, value: 'review' },
                 { name: '2. Reconfigure AI Settings', value: 'reconfigure' },
                 { name: '3. /help', value: 'help' },
                 { name: '4. Exit', value: 'exit' }
@@ -324,7 +389,7 @@ async function showMainMenu() {
         } else {
             choices = [
                 { name: '1. Setup Local LLM', value: 'local' },
-                { name: '2. Setup AI API Key (Gemini)', value: 'api' },
+                { name: '2. Setup Cloud AI API (OpenAI, Anthropic, Gemini)', value: 'api' },
                 { name: '3. /help', value: 'help' },
                 { name: '4. Exit', value: 'exit' }
             ];
@@ -341,7 +406,7 @@ async function showMainMenu() {
                 message: 'Which AI engine do you want to configure?',
                 choices: [
                     { name: 'Local LLM', value: 'local' },
-                    { name: 'Gemini API', value: 'api' },
+                    { name: 'Cloud API (OpenAI/Anthropic/Gemini)', value: 'api' },
                     { name: 'Cancel', value: 'cancel' }
                 ]
             });
@@ -400,11 +465,30 @@ async function showMainMenu() {
                 if (reviewed) exit = true;
             }
         } else if (choice === 'api') {
-            config.llmType = 'gemini';
-            config.apiKey = await password({ message: 'Enter Gemini API Key:', mask: '*' });
+            config.llmType = 'api';
+            
+            const provider = await select({
+                message: 'Select your API Provider:',
+                choices: [
+                    { name: 'OpenAI', value: 'openai' },
+                    { name: 'Anthropic', value: 'anthropic' },
+                    { name: 'Google Gemini', value: 'gemini' }
+                ]
+            });
+            config.apiProvider = provider;
+            
+            let defaultModel = '';
+            if (provider === 'openai') defaultModel = 'gpt-4o';
+            if (provider === 'anthropic') defaultModel = 'claude-3-5-sonnet-latest';
+            if (provider === 'gemini') defaultModel = 'gemini-2.5-flash';
+            
+            config.apiKey = await password({ message: `Enter ${provider} API Key:`, mask: '*' });
+            config.modelName = await input({ message: 'Enter Model Name:', default: defaultModel });
+            
             config.isSetup = true; // Mark as setup
             saveConfig(config);
-            console.log(chalk.green('✓ Gemini API Key configured and saved locally!\n'));
+            const displayProvider = provider.charAt(0).toUpperCase() + provider.slice(1);
+            console.log(chalk.green(`✓ ${displayProvider} API configured and saved locally!\n`));
 
             const runNow = await confirm({ message: 'Do you want to run a code review right now?' });
             if (runNow) {
