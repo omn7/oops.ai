@@ -559,7 +559,7 @@ async function showMainMenu() {
         if (config.isSetup) {
             choices = [
                 { name: `1. Run Manual Code Review (${config.llmType === 'local' ? 'Local LLM' : (config.apiProvider ? config.apiProvider.toUpperCase() : 'API')})`, value: 'review' },
-                { name: '2. Run Deep Project Scan (Offline / No AI)', value: 'deep_scan' },
+                { name: '2. Run Full Project Scan (Offline + AI Auto-Fix)', value: 'deep_scan' },
                 { name: '3. Reconfigure AI Settings', value: 'reconfigure' },
                 { name: '4. Check for Updates', value: 'update' },
                 { name: '5. /help', value: 'help' },
@@ -569,7 +569,7 @@ async function showMainMenu() {
             choices = [
                 { name: '1. Setup Local LLM', value: 'local' },
                 { name: '2. Setup Cloud AI API (OpenAI, Anthropic, Gemini)', value: 'api' },
-                { name: '3. Run Deep Project Scan (Offline / No AI)', value: 'deep_scan' },
+                { name: '3. Run Full Project Scan (Offline + AI Auto-Fix)', value: 'deep_scan' },
                 { name: '4. Check for Updates', value: 'update' },
                 { name: '5. /help', value: 'help' },
                 { name: '6. Exit', value: 'exit' }
