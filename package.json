@@ -1,7 +1,9 @@
 {
-  "name": "oops",
+  "name": "oops-ai",
   "version": "1.0.0",
-  "description": "AI-powered Code Review Assistant CLI",
+  "description": "AI-powered Code Review & DevSecOps CLI",
+  "author": "omn7 & Jayeshmahajan0",
+  "keywords": ["ai", "security", "code-review", "devsecops", "cli", "pre-commit", "linter", "gemini", "ollama", "openai"],
   "main": "index.js",
   "type": "module",
   "bin": {
