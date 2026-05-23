@@ -133,7 +133,7 @@ function walkDir(dir, fileList = []) {
     return fileList;
 }
 
-function runDeepProjectScan() {
+async function runDeepProjectScan(config) {
     const spinner = ora({ text: tealGradient('Running Deep Offline Static Analysis...'), color: 'cyan' }).start();
     const files = walkDir(process.cwd());
     let issuesFound = [];
@@ -180,11 +180,110 @@ function runDeepProjectScan() {
             console.log(chalk.yellow(`${index + 1}. [${issue.type}] `) + chalk.white(`${issue.issue}`));
             console.log(chalk.gray(`   File: ${issue.file}:${issue.line}\n`));
         });
-        console.log(chalk.cyan('Recommendation: Please review the files above and apply necessary fixes.\n'));
+        if (config) {
+            console.log(chalk.cyan('Auto-triggering Deep AI Review on flagged files...'));
+            const uniqueFiles = [...new Set(issuesFound.map(i => i.file))];
+            await executeHybridAIReview(uniqueFiles, config);
+        } else {
+            console.log(chalk.cyan('Recommendation: Please review the files above and apply necessary fixes.\n'));
+        }
     } else {
         console.log(chalk.green('\n✓ Deep Scan Passed. No obvious static vulnerabilities found.\n'));
     }
 }
+
+async function executeHybridAIReview(files, config) {
+    let combinedContent = '';
+    for (const file of files) {
+        try {
+            const absolutePath = path.resolve(process.cwd(), file);
+            const content = fs.readFileSync(absolutePath, 'utf8');
+            combinedContent += `\n--- File: ${file} ---\n${content}\n`;
+        } catch (e) { }
+    }
+
+    if (!combinedContent.trim()) return;
+
+    const spinner = ora({ text: tealGradient('AI is deeply analyzing flagged files...'), color: 'cyan' }).start();
+    const prompt = `You are an expert AI code reviewer. The local static scanner flagged the following files for potential vulnerabilities (e.g. secrets, missing try/catch, DB loops, open admin routes). Please perform a deep architectural review and provide fixes for these specific files:\n\n${combinedContent}`;
+
+    try {
+        let fixContent = '';
+        if (config.llmType === 'api' || config.llmType === 'gemini') {
+            if (config.apiProvider === 'gemini' || config.llmType === 'gemini') {
+                const ai = new GoogleGenAI({ apiKey: config.apiKey });
+                const response = await ai.models.generateContent({
+                    model: config.modelName || 'gemini-2.5-flash',
+                    contents: prompt,
+                });
+                fixContent = response.text;
+            } else if (config.apiProvider === 'openai') {
+                const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
+                    body: JSON.stringify({
+                        model: config.modelName || 'gpt-4o',
+                        messages: [{ role: 'user', content: prompt }]
+                    })
+                });
+                if (!response.ok) throw new Error(`OpenAI HTTP error: ${response.status}`);
+                const data = await response.json();
+                fixContent = data.choices[0].message.content;
+            } else if (config.apiProvider === 'anthropic') {
+                const response = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json', 
+                        'x-api-key': config.apiKey, 
+                        'anthropic-version': '2023-06-01' 
+                    },
+                    body: JSON.stringify({
+                        model: config.modelName || 'claude-3-5-sonnet-latest',
+                        max_tokens: 4096,
+                        messages: [{ role: 'user', content: prompt }]
+                    })
+                });
+                if (!response.ok) throw new Error(`Anthropic HTTP error: ${response.status}`);
+                const data = await response.json();
+                fixContent = data.content[0].text;
+            }
+        } else {
+            const response = await fetch(config.localUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: config.localModel,
+                    prompt: prompt,
+                    stream: false
+                })
+            });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            const data = await response.json();
+            fixContent = data.response;
+        }
+        
+        spinner.stop();
+
+        // Create a unique filename for the output
+        let counter = 1;
+        let filename = 'oops-deep-fix.txt';
+        while (fs.existsSync(path.join(process.cwd(), filename))) {
+            filename = `oops-deep-fix-${counter}.txt`;
+            counter++;
+        }
+
+        const outPath = path.join(process.cwd(), filename);
+        fs.writeFileSync(outPath, fixContent, 'utf8');
+
+        console.log(chalk.green(`\n✓ Deep AI Review Complete! Report saved to `) + chalk.cyan.bold(filename));
+        console.log(chalk.gray(`You can open this file to review the detailed fixes.\n`));
+
+    } catch (e) {
+        spinner.fail(chalk.red('Failed to generate deep AI fix.'));
+        console.error(chalk.red(e.message));
+    }
+}
+
 
 async function runApiReview(diff, config) {
     if (!config.apiKey) {
@@ -581,7 +680,7 @@ async function showMainMenu() {
             const reviewed = await executeManualReview(config);
             if (reviewed) exit = true;
         } else if (choice === 'deep_scan') {
-            runDeepProjectScan();
+            await runDeepProjectScan(config);
         } else if (choice === 'update') {
             updateOops();
         } else if (choice === 'help') {
@@ -621,7 +720,8 @@ async function main() {
     if (command === '--pre-commit') {
         await runPreCommitHook();
     } else if (command === 'scan') {
-        runDeepProjectScan();
+        const config = loadConfig();
+        await runDeepProjectScan(config);
     } else if (command === 'update') {
         updateOops();
     } else if (command === 'start') {
