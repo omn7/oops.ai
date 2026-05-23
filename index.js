@@ -7,6 +7,7 @@ import { execSync } from 'child_process';
 import { select, input, confirm, password } from '@inquirer/prompts';
 import ora from 'ora';
 import chalk from 'chalk';
+import boxen from 'boxen';
 import { GoogleGenAI } from '@google/genai';
 
 const CONFIG_PATH = path.join(os.homedir(), '.oops_config.json');
@@ -53,10 +54,26 @@ function tealGradient(text) {
 
 function printHeader() {
     console.log();
-    console.log(tealGradient('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
-    console.log(tealGradient('        Oops - AI Code Review Assistant          '));
-    console.log(tealGradient('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
-    console.log();
+    const logo = `   ____                  
+  / __ \\____  ____  _____
+ / / / / __ \\/ __ \\/ ___/
+/ /_/ / /_/ / /_/ (__  ) 
+\\____/\\____/ .___/____/  
+          /_/            `;
+          
+    const title = chalk.bold.white('AI Code Review Assistant');
+    const content = tealGradient(logo) + '\n\n' + title;
+    
+    const headerBox = boxen(content, {
+        padding: 1,
+        margin: 1,
+        borderStyle: 'round',
+        borderColor: '#20B2AA',
+        textAlignment: 'center',
+        float: 'center'
+    });
+    
+    console.log(headerBox);
 }
 
 function getStagedDiff() {
