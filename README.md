@@ -75,4 +75,4 @@ If you choose to **Generate a fix**, Oops will output the exact code changes nee
 
 ---
 
-*Built with Node.js, @inquirer/prompts, and AI.*
+*Built by @omn7 and @jayeshmahajan0.*
