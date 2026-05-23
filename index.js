@@ -9,6 +9,10 @@ import ora from 'ora';
 import chalk from 'chalk';
 import boxen from 'boxen';
 import { GoogleGenAI } from '@google/genai';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const CONFIG_PATH = path.join(os.homedir(), '.oops_config.json');
 
@@ -458,16 +462,18 @@ async function showMainMenu() {
                 { name: `1. Run Manual Code Review (${config.llmType === 'local' ? 'Local LLM' : (config.apiProvider ? config.apiProvider.toUpperCase() : 'API')})`, value: 'review' },
                 { name: '2. Run Deep Project Scan (Offline / No AI)', value: 'deep_scan' },
                 { name: '3. Reconfigure AI Settings', value: 'reconfigure' },
-                { name: '4. /help', value: 'help' },
-                { name: '5. Exit', value: 'exit' }
+                { name: '4. Check for Updates', value: 'update' },
+                { name: '5. /help', value: 'help' },
+                { name: '6. Exit', value: 'exit' }
             ];
         } else {
             choices = [
                 { name: '1. Setup Local LLM', value: 'local' },
                 { name: '2. Setup Cloud AI API (OpenAI, Anthropic, Gemini)', value: 'api' },
                 { name: '3. Run Deep Project Scan (Offline / No AI)', value: 'deep_scan' },
-                { name: '4. /help', value: 'help' },
-                { name: '5. Exit', value: 'exit' }
+                { name: '4. Check for Updates', value: 'update' },
+                { name: '5. /help', value: 'help' },
+                { name: '6. Exit', value: 'exit' }
             ];
         }
 
@@ -576,6 +582,8 @@ async function showMainMenu() {
             if (reviewed) exit = true;
         } else if (choice === 'deep_scan') {
             runDeepProjectScan();
+        } else if (choice === 'update') {
+            updateOops();
         } else if (choice === 'help') {
              console.log(tealGradient('\n━━━━━━━━━ Oops Help ━━━━━━━━━'));
              console.log(chalk.white('Oops is an AI Code Review Assistant that prevents you from pushing bad code.'));
@@ -592,6 +600,20 @@ async function showMainMenu() {
     }
 }
 
+function updateOops() {
+    console.log(chalk.cyan('\nChecking for updates from GitHub...'));
+    try {
+        const result = execSync('git pull', { encoding: 'utf-8', cwd: __dirname });
+        if (result.includes('Already up to date')) {
+            console.log(chalk.green('✓ Oops is already up to date!\n'));
+        } else {
+            console.log(chalk.green('✓ Oops updated successfully!\n'));
+        }
+    } catch (e) {
+        console.error(chalk.red('🚨 Failed to update Oops. Are you sure it was installed via git clone?'));
+    }
+}
+
 async function main() {
     const args = process.argv.slice(2);
     const command = args[0];
@@ -600,6 +622,8 @@ async function main() {
         await runPreCommitHook();
     } else if (command === 'scan') {
         runDeepProjectScan();
+    } else if (command === 'update') {
+        updateOops();
     } else if (command === 'start') {
         printHeader();
         await showMainMenu();
