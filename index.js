@@ -1,0 +1,402 @@
+#!/usr/bin/env node
+
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import { execSync } from 'child_process';
+import { select, input, confirm, password } from '@inquirer/prompts';
+import ora from 'ora';
+import chalk from 'chalk';
+import { GoogleGenAI } from '@google/genai';
+
+const CONFIG_PATH = path.join(os.homedir(), '.oops_config.json');
+
+function loadConfig() {
+    if (fs.existsSync(CONFIG_PATH)) {
+        try {
+            return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+        } catch (e) {
+            return getDefaultConfig();
+        }
+    }
+    return getDefaultConfig();
+}
+
+function getDefaultConfig() {
+    return { 
+        isSetup: false,
+        llmType: 'gemini', 
+        modelName: 'gemini-2.5-flash', 
+        apiKey: '', 
+        localUrl: 'http://127.0.0.1:11434/api/generate', 
+        localModel: 'llama3' 
+    };
+}
+
+function saveConfig(config) {
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
+}
+
+// Custom teal-green gradient using chalk.hex()
+function tealGradient(text) {
+    const colors = [
+        '#008080', '#038685', '#068D8A', '#09938F', '#0C9A94',
+        '#0FA099', '#12A79F', '#15ADA4', '#18B4A9', '#1BBBAE',
+        '#1EC1B3', '#20B2AA'
+    ];
+    return text.split('').map((char, i) => {
+        if (char === ' ') return ' ';
+        const color = colors[Math.floor((i / text.length) * colors.length)];
+        return chalk.hex(color)(char);
+    }).join('');
+}
+
+function printHeader() {
+    console.log();
+    console.log(tealGradient('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
+    console.log(tealGradient('        Oops - AI Code Review Assistant          '));
+    console.log(tealGradient('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
+    console.log();
+}
+
+function getStagedDiff() {
+    try {
+        const diff = execSync('git diff --staged', { encoding: 'utf-8' });
+        return diff;
+    } catch (error) {
+        console.error(chalk.red('🚨 Failed to get git diff. Are you in a git repository?'));
+        process.exit(1);
+    }
+}
+
+function runLocalScan(diff) {
+    // Regex catches AWS keys, JWTs, OpenAI keys, .env patterns, passwords
+    const secretsRegex = /(AKIA[0-9A-Z]{16})|(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})|(sk-[a-zA-Z0-9]{48})|([A-Za-z0-9_]{1,}password.*)/i;
+    
+    // Explicitly check for .env file modifications in diff headers
+    // Split the string so the scanner doesn't accidentally trip on its own source code when you commit index.js!
+    const envAdded = '+++ b/' + '.env';
+    const envRemoved = '--- a/' + '.env';
+    const hasEnvFile = diff.includes(envAdded) || diff.includes(envRemoved);
+
+    if (hasEnvFile) {
+        console.log(chalk.red.bold('🚨 Local Scan Failed: .env file or contents detected in staged changes!'));
+        process.exit(1); // Blocks the commit
+    }
+
+    if (secretsRegex.test(diff)) {
+        console.log(chalk.red.bold('🚨 Local Scan Failed: Potential hardcoded secret detected!'));
+        process.exit(1); // Blocks the commit
+    }
+}
+
+async function runGeminiReview(diff, apiKey) {
+    if (!apiKey) {
+        console.log(chalk.yellow('⚠️  Gemini API Key is not set! Run "oops start" to configure it.'));
+        process.exit(1);
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
+    const spinner = ora({
+        text: tealGradient('Analyzing diff with Gemini...'),
+        color: 'cyan'
+    }).start();
+
+    try {
+        const prompt = `Review the following git diff for logical security flaws (e.g. SQL injection, exposed internal paths, bad architecture). Be incredibly concise. If it looks secure, just reply "Looks good". If there are issues, list them briefly.\n\n${diff}`;
+        
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+
+        spinner.stop();
+
+        const text = response.text;
+        if (text.toLowerCase().includes('looks good') && text.length < 50) {
+             console.log(chalk.green('✓ AI Review: Passed. Code looks secure.'));
+             return { passed: true, feedback: text };
+        } else {
+             console.log(tealGradient('\nAI Review Feedback:'));
+             console.log(chalk.white(text));
+             console.log(chalk.yellow('\nPlease review the above feedback before committing.'));
+             return { passed: false, feedback: text };
+        }
+
+    } catch (error) {
+        spinner.fail(chalk.red('AI Review failed.'));
+        console.error(chalk.red(error.message));
+        process.exit(1);
+    }
+}
+
+async function runOllamaReview(diff, url, model) {
+    const spinner = ora({
+        text: tealGradient(`Analyzing diff with local model (${model})...`),
+        color: 'cyan'
+    }).start();
+
+    try {
+        const prompt = `Review the following git diff for logical security flaws. Be incredibly concise. If it looks secure, just reply "Looks good". If there are issues, list them briefly.\n\n${diff}`;
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: model,
+                prompt: prompt,
+                stream: false
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        spinner.stop();
+
+        const text = data.response;
+        if (text.toLowerCase().includes('looks good') && text.length < 50) {
+             console.log(chalk.green('✓ AI Review: Passed. Code looks secure.'));
+             return { passed: true, feedback: text };
+        } else {
+             console.log(tealGradient('\nAI Review Feedback:'));
+             console.log(chalk.white(text));
+             console.log(chalk.yellow('\nPlease review the above feedback before committing.'));
+             return { passed: false, feedback: text };
+        }
+    } catch (error) {
+        spinner.fail(chalk.red('Local LLM review failed. Is the server running?'));
+        console.error(chalk.red(error.message));
+        process.exit(1);
+    }
+}
+
+async function generateFix(diff, feedback, config) {
+    const spinner = ora({ text: tealGradient('Generating fix...'), color: 'cyan' }).start();
+    const prompt = `You are an expert AI coding assistant. The user has the following git diff which has security or code quality issues:\n\n${diff}\n\nThe issues identified are:\n${feedback}\n\nPlease provide the exact code changes or a brief explanation of how to fix these issues. Provide code snippets to show the corrected implementation.`;
+
+    try {
+        let fixContent = '';
+        if (config.llmType === 'gemini') {
+            const ai = new GoogleGenAI({ apiKey: config.apiKey });
+            const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: prompt,
+            });
+            fixContent = response.text;
+        } else {
+            const response = await fetch(config.localUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: config.localModel,
+                    prompt: prompt,
+                    stream: false
+                })
+            });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            const data = await response.json();
+            fixContent = data.response;
+        }
+        
+        spinner.stop();
+
+        // Create a unique filename for the output
+        let counter = 1;
+        let filename = 'oops-fix.txt';
+        while (fs.existsSync(path.join(process.cwd(), filename))) {
+            filename = `oops-fix-${counter}.txt`;
+            counter++;
+        }
+
+        const outPath = path.join(process.cwd(), filename);
+        fs.writeFileSync(outPath, fixContent, 'utf8');
+
+        console.log(chalk.green(`\n✓ Suggested fix successfully saved to `) + chalk.cyan.bold(filename));
+        console.log(chalk.gray(`You can open this file to review and easily copy the solution.\n`));
+
+    } catch (e) {
+        spinner.fail(chalk.red('Failed to generate fix.'));
+        console.error(chalk.red(e.message));
+    }
+}
+
+async function runReview(diff, config) {
+    if (config.llmType === 'gemini') {
+        return await runGeminiReview(diff, config.apiKey);
+    } else {
+        return await runOllamaReview(diff, config.localUrl, config.localModel);
+    }
+}
+
+async function executeManualReview(config) {
+    const diff = getStagedDiff();
+    if (!diff.trim()) {
+        console.log(chalk.gray('No staged changes found to review. Try running "git add <file>" first.\n'));
+        return false;
+    }
+    const scanSpinner = ora({ text: tealGradient('Running fast local scan...'), color: 'cyan' }).start();
+    runLocalScan(diff);
+    scanSpinner.succeed(chalk.green('Local scan passed. No exposed secrets found.'));
+    
+    const result = await runReview(diff, config);
+    if (!result.passed) {
+        const action = await select({
+            message: 'Issues were found. What would you like to do?',
+            choices: [
+                { name: 'Generate a prompt/solution to fix it', value: 'fix' },
+                { name: 'Exit', value: 'exit' }
+            ]
+        });
+
+        if (action === 'fix') {
+            await generateFix(diff, result.feedback, config);
+        }
+    }
+    return true;
+}
+
+async function runPreCommitHook() {
+    const config = loadConfig();
+    const diff = getStagedDiff();
+    if (!diff.trim()) {
+        return; // Nothing to review
+    }
+    const scanSpinner = ora({ text: tealGradient('Running fast local scan...'), color: 'cyan' }).start();
+    runLocalScan(diff);
+    scanSpinner.succeed(chalk.green('Local scan passed. No exposed secrets found.'));
+
+    const result = await runReview(diff, config);
+    if (!result.passed) {
+        try {
+            const action = await select({
+                message: 'Issues were found. What would you like to do?',
+                choices: [
+                    { name: 'Generate a prompt/solution to fix it', value: 'fix' },
+                    { name: 'Exit and block commit', value: 'exit' }
+                ]
+            });
+
+            if (action === 'fix') {
+                await generateFix(diff, result.feedback, config);
+            }
+            process.exit(1); // Always block commit if it failed the review
+        } catch (e) {
+            // Non-interactive fallback (e.g. if run via standard terminal pre-commit)
+            process.exit(1);
+        }
+    }
+}
+
+async function showMainMenu() {
+    const config = loadConfig();
+    let exit = false;
+
+    while (!exit) {
+        let choices = [];
+
+        // If the user has already set up the AI, change the menu options
+        if (config.isSetup) {
+            choices = [
+                { name: `1. Run Manual Code Review (${config.llmType === 'gemini' ? 'Gemini' : 'Local LLM'})`, value: 'review' },
+                { name: '2. Reconfigure AI Settings', value: 'reconfigure' },
+                { name: '3. /help', value: 'help' },
+                { name: '4. Exit', value: 'exit' }
+            ];
+        } else {
+            choices = [
+                { name: '1. Setup Local LLM', value: 'local' },
+                { name: '2. Setup AI API Key (Gemini)', value: 'api' },
+                { name: '3. /help', value: 'help' },
+                { name: '4. Exit', value: 'exit' }
+            ];
+        }
+
+        let choice = await select({
+            message: 'What would you like to do?',
+            choices: choices
+        });
+
+        // Handle Reconfigure sub-menu
+        if (choice === 'reconfigure') {
+            const reconfChoice = await select({
+                message: 'Which AI engine do you want to configure?',
+                choices: [
+                    { name: 'Local LLM', value: 'local' },
+                    { name: 'Gemini API', value: 'api' },
+                    { name: 'Cancel', value: 'cancel' }
+                ]
+            });
+            if (reconfChoice === 'cancel') continue;
+            choice = reconfChoice; // Route to the setup blocks below
+        }
+
+        if (choice === 'local') {
+            config.llmType = 'local';
+            config.localUrl = await input({ message: 'Enter local LLM API URL:', default: config.localUrl });
+            config.localModel = await input({ message: 'Enter local model name:', default: config.localModel });
+            config.isSetup = true; // Mark as setup
+            saveConfig(config);
+            console.log(chalk.green('✓ Local LLM configured and saved locally!\n'));
+
+            const runNow = await confirm({ message: 'Do you want to run a code review right now?' });
+            if (runNow) {
+                const reviewed = await executeManualReview(config);
+                if (reviewed) exit = true;
+            }
+        } else if (choice === 'api') {
+            config.llmType = 'gemini';
+            config.apiKey = await password({ message: 'Enter Gemini API Key:', mask: '*' });
+            config.isSetup = true; // Mark as setup
+            saveConfig(config);
+            console.log(chalk.green('✓ Gemini API Key configured and saved locally!\n'));
+
+            const runNow = await confirm({ message: 'Do you want to run a code review right now?' });
+            if (runNow) {
+                const reviewed = await executeManualReview(config);
+                if (reviewed) exit = true;
+            }
+        } else if (choice === 'review') {
+            const reviewed = await executeManualReview(config);
+            if (reviewed) exit = true;
+        } else if (choice === 'help') {
+             console.log(tealGradient('\n━━━━━━━━━ Oops Help ━━━━━━━━━'));
+             console.log(chalk.white('Oops is an AI Code Review Assistant that prevents you from pushing bad code.'));
+             console.log(chalk.white('It intercepts your git commits via a pre-commit hook.\n'));
+             console.log(tealGradient('Commands:'));
+             console.log(chalk.cyan('oops start'), '   - Open this interactive menu.');
+             console.log(chalk.cyan('git commit'), '   - Automatically triggers Oops to scan staged files.\n');
+             console.log(tealGradient('Configuration:'));
+             console.log(chalk.white('Your settings are saved securely in: ') + chalk.gray(CONFIG_PATH) + '\n');
+        } else if (choice === 'exit') {
+            exit = true;
+            console.log(tealGradient('Goodbye!'));
+        }
+    }
+}
+
+async function main() {
+    const args = process.argv.slice(2);
+    const command = args[0];
+
+    if (command === '--pre-commit') {
+        await runPreCommitHook();
+    } else if (command === 'start') {
+        printHeader();
+        await showMainMenu();
+    } else {
+        console.log(chalk.gray('Usage: oops start'));
+        console.log(chalk.gray('Usage: node index.js start'));
+    }
+}
+
+main().catch(error => {
+    if (error.name === 'ExitPromptError') {
+        // Handle user pressing Ctrl+C gracefully
+        console.log(tealGradient('\nGoodbye!'));
+        process.exit(0);
+    }
+    console.error(chalk.red('🚨 An unexpected error occurred:'), error);
+    process.exit(1);
+});
