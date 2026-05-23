@@ -1,39 +1,28 @@
-# Oops - AI Code Review Assistant 🚨
+# Oops - AI Code Review & DevSecOps CLI 🚨
 
-Never accidentally push bad code, exposed secrets, or vulnerable scripts again. **Oops** is an intelligent CLI tool that intercepts your Git commits via a pre-commit hook and uses AI (Google Gemini or a local Ollama model) to perform a deep logical security review of your code before it reaches your repository.
-
----
-
-## Features
-
-- **Fast Local Scan:** Instantly catches `.env` files, AWS keys, JWTs, and common secrets using Regex before the AI is even invoked.
-- **AI-Powered Code Review:** Sends staged diffs to Google Gemini or a local LLM for context-aware logical security reviews.
-- **Interactive Fix Generation:** If an issue is found, Oops can automatically generate a fix and save it to a local text file for you to apply effortlessly.
-- **Cross-Platform:** Works on Windows, macOS, and Linux.
-- **Easy Integration:** Seamlessly integrates with Husky.
+Never accidentally push bad code, exposed secrets, or vulnerable scripts again. **Oops** is an intelligent CLI DevSecOps agent that intercepts your Git commits, scans your entire project, and automatically fixes vulnerabilities using AI (OpenAI, Anthropic, Gemini, or local Ollama models) before your code reaches production.
 
 ---
 
-## 🚀 1-Click Installation
+## 🏆 Hackathon "Killer Features"
 
-You can install `oops` globally on your system using our automated installation scripts.
+- **✨ Auto-Heal Workflow:** Oops doesn't just tell you what's wrong. If it finds a vulnerability, it will parse the AI's JSON response and literally rewrite and fix the code inside your local files automatically.
+- **🧠 Smart Framework Detection:** The offline Deep Scanner dynamically analyzes your project structure. It automatically loads custom security rules if it detects React, Next.js (`NEXT_PUBLIC_` secret leaks), or Python Django projects.
+- **☁️ Enterprise CI/CD Pipeline Generator:** One click transforms Oops from a local CLI into an Enterprise DevSecOps tool. Run `oops setup-ci` to instantly generate a GitHub Actions workflow that blocks vulnerable Pull Requests across your entire team.
 
-### Windows (PowerShell)
-```powershell
-iex (irm https://raw.githubusercontent.com/omn7/oops.ai/main/scripts/install.ps1)
-```
+---
 
-### macOS / Linux (Bash)
+## 🚀 Installation & Usage
+
+You can install `oops` globally on your system using NPM:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/omn7/oops.ai/main/scripts/install.sh | bash
+npm install -g oops-sec-cli
 ```
 
-*Alternatively, you can install it manually by cloning the repo and running `npm install -g .`*
+*(Alternatively, you can install via our bash/powershell scripts from the GitHub repo).*
 
----
-
-## ⚙️ Initial Configuration
-
+### ⚙️ Interactive Menu
 Once installed, simply run the interactive setup menu from anywhere in your terminal:
 
 ```bash
@@ -41,17 +30,16 @@ oops start
 ```
 
 This interactive menu allows you to:
-1. **Setup Local LLM:** Connect to your local Ollama instance.
-2. **Setup AI API Key:** Securely enter and save your Gemini API Key.
-3. **Run Manual Review:** Immediately review any staged files in your current repository.
-
-*Your configuration is stored securely in `~/.oops_config.json`.*
+1. **Setup Cloud AI API:** Enter your OpenAI, Anthropic, or Gemini API Key.
+2. **Setup Local LLM:** Connect to your local Ollama instance for 100% private, offline code reviews.
+3. **Run Full Project Scan:** Scan your entire directory for vulnerabilities and let the AI **Auto-Heal** your code.
+4. **Generate CI/CD Pipeline:** Automatically write a `.github/workflows/oops-security.yml` file to protect your repository on GitHub.
 
 ---
 
-## 🔗 Adding Oops to Your Projects
+## 🔗 Protecting Commits (Pre-Commit Hook)
 
-To protect an existing project, simply navigate to that project's folder and integrate Oops with Husky:
+To protect an existing project, navigate to your folder and integrate Oops with Husky:
 
 ```bash
 # 1. Initialize Husky
@@ -62,17 +50,8 @@ echo -e "exec < /dev/tty\noops --pre-commit" > .husky/pre-commit
 ```
 *(Note on Windows: Use `echo "exec < /dev/tty` followed by a new line with `oops --pre-commit" > .husky/pre-commit` if your shell doesn't support `-e`)*
 
-Now, whenever you run `git commit`, Oops will automatically intercept and scan your staged files!
+Now, whenever you run `git commit`, Oops will automatically intercept and scan your staged files! If a secret or vulnerability is found, it blocks the commit and gives you the option to let the AI fix it.
 
 ---
 
-## 🛠️ Automated Fixes
-
-If Oops detects a vulnerability, it will block the commit and ask:
-> **? Issues were found. What would you like to do?**
-
-If you choose to **Generate a fix**, Oops will output the exact code changes needed directly into an `oops-fix.txt` file in your directory.
-
----
-
-*Built by @omn7 and @jayeshmahajan0.*
+*Built by @omn7 and @jayeshmahajan0*
