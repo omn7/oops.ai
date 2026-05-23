@@ -1,10 +1,16 @@
 # Oops - AI Code Review & DevSecOps CLI 🚨
 
+[![NPM Version](https://img.shields.io/npm/v/oops-sec-cli.svg)](https://www.npmjs.com/package/oops-sec-cli)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Never accidentally push bad code, exposed secrets, or vulnerable scripts again. **Oops** is an intelligent CLI DevSecOps agent that intercepts your Git commits, scans your entire project, and automatically fixes vulnerabilities using AI (OpenAI, Anthropic, Gemini, or local Ollama models) before your code reaches production.
+
+🌐 **Website:** [oopsai.vercel.app](https://oopsai.vercel.app/)  
+📦 **NPM Package:** [npmjs.com/package/oops-sec-cli](https://www.npmjs.com/package/oops-sec-cli?activeTab=dependencies)
 
 ---
 
-## 🏆 Hackathon "Killer Features"
+## 🌟 Core Features
 
 - **✨ Auto-Heal Workflow:** Oops doesn't just tell you what's wrong. If it finds a vulnerability, it will parse the AI's JSON response and literally rewrite and fix the code inside your local files automatically.
 - **🧠 Smart Framework Detection:** The offline Deep Scanner dynamically analyzes your project structure. It automatically loads custom security rules if it detects React, Next.js (`NEXT_PUBLIC_` secret leaks), or Python Django projects.
@@ -19,8 +25,6 @@ You can install `oops` globally on your system using NPM:
 ```bash
 npm install -g oops-sec-cli
 ```
-
-*(Alternatively, you can install via our bash/powershell scripts from the GitHub repo).*
 
 ### ⚙️ Interactive Menu
 Once installed, simply run the interactive setup menu from anywhere in your terminal:
@@ -51,6 +55,11 @@ echo -e "exec < /dev/tty\noops --pre-commit" > .husky/pre-commit
 *(Note on Windows: Use `echo "exec < /dev/tty` followed by a new line with `oops --pre-commit" > .husky/pre-commit` if your shell doesn't support `-e`)*
 
 Now, whenever you run `git commit`, Oops will automatically intercept and scan your staged files! If a secret or vulnerability is found, it blocks the commit and gives you the option to let the AI fix it.
+
+---
+
+## 🤝 Contributing
+Contributions are always welcome! Please read our [Contributing Guide](CONTRIBUTING.md) to learn how you can help improve Oops.
 
 ---
 
