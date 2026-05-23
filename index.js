@@ -702,14 +702,28 @@ async function showMainMenu() {
 function updateOops() {
     console.log(chalk.cyan('\nChecking for updates from GitHub...'));
     try {
-        const result = execSync('git pull', { encoding: 'utf-8', cwd: __dirname });
-        if (result.includes('Already up to date')) {
-            console.log(chalk.green('✓ Oops is already up to date!\n'));
-        } else {
+        const isGlobal = __dirname.includes('.oops-cli');
+        if (isGlobal) {
+            // Safe to reset if it's the global installation folder
+            execSync('git fetch', { encoding: 'utf-8', cwd: __dirname });
+            execSync('git reset --hard origin/main', { encoding: 'utf-8', cwd: __dirname });
             console.log(chalk.green('✓ Oops updated successfully!\n'));
+        } else {
+            // For developers working locally, do a normal pull
+            try {
+                const result = execSync('git pull', { encoding: 'utf-8', cwd: __dirname });
+                if (result.includes('Already up to date')) {
+                    console.log(chalk.green('✓ Oops is already up to date!\n'));
+                } else {
+                    console.log(chalk.green('✓ Oops updated successfully!\n'));
+                }
+            } catch (pullError) {
+                console.error(chalk.red('\n🚨 Update failed! You have uncommitted local changes in your oops.ai repository.'));
+                console.log(chalk.yellow('Please commit or stash your changes before running update.\n'));
+            }
         }
     } catch (e) {
-        console.error(chalk.red('🚨 Failed to update Oops. Are you sure it was installed via git clone?'));
+        console.error(chalk.red('\n🚨 Failed to update Oops. Are you sure it was installed via git clone?'));
     }
 }
 
