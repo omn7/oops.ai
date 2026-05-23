@@ -63,7 +63,9 @@ function printHeader() {
           /_/            `;
           
     const title = chalk.bold.white('AI Code Review Assistant');
-    const subtitle = chalk.dim('Created by @omn7 and @Jayeshmahajan0');
+    const omn7Link = '\u001b]8;;https://github.com/omn7\u0007@omn7\u001b]8;;\u0007';
+    const jayeshLink = '\u001b]8;;https://github.com/Jayeshmahajan0\u0007@Jayeshmahajan0\u001b]8;;\u0007';
+    const subtitle = chalk.dim(`Created by ${omn7Link} and ${jayeshLink}`);
     const content = tealGradient(logo) + '\n\n' + title + '\n' + subtitle;
     
     const headerBox = boxen(content, {
