@@ -1,7 +1,7 @@
 # Oops - AI Code Review & DevSecOps CLI 🚨
 
 <p align="center">
-  <img src="logo.png" alt="Oops.ai Logo" width="500">
+  <img src="https://github.com/user-attachments/assets/828f8609-b593-47dc-9d67-352e0b1706a3" alt="Oops.ai Logo" width="500">
 </p>
 
 
