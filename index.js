@@ -63,7 +63,8 @@ function printHeader() {
           /_/            `;
           
     const title = chalk.bold.white('AI Code Review Assistant');
-    const content = tealGradient(logo) + '\n\n' + title;
+    const subtitle = chalk.dim('Created by @omn7 and @Jayeshmahajan0');
+    const content = tealGradient(logo) + '\n\n' + title + '\n' + subtitle;
     
     const headerBox = boxen(content, {
         padding: 1,
