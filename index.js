@@ -351,8 +351,45 @@ async function showMainMenu() {
 
         if (choice === 'local') {
             config.llmType = 'local';
-            config.localUrl = await input({ message: 'Enter local LLM API URL:', default: config.localUrl });
-            config.localModel = await input({ message: 'Enter local model name:', default: config.localModel });
+            
+            const provider = await select({
+                message: 'Select your Local LLM Provider:',
+                choices: [
+                    { name: 'Ollama (Auto-detect)', value: 'ollama' },
+                    { name: 'Custom API URL', value: 'custom' }
+                ]
+            });
+
+            if (provider === 'ollama') {
+                config.localUrl = 'http://127.0.0.1:11434/api/generate';
+                const spinner = ora({ text: tealGradient('Detecting local Ollama models...'), color: 'cyan' }).start();
+                try {
+                    const res = await fetch('http://127.0.0.1:11434/api/tags');
+                    if (!res.ok) throw new Error('Network response was not ok');
+                    const data = await res.json();
+                    spinner.stop();
+                    
+                    if (data.models && data.models.length > 0) {
+                        const choices = data.models.map(m => ({ name: m.name, value: m.name }));
+                        config.localModel = await select({
+                            message: 'Select an installed Ollama model:',
+                            choices: choices
+                        });
+                    } else {
+                        console.log(chalk.yellow('⚠️  No models found in Ollama. Please pull a model first (e.g., ollama pull llama3).'));
+                        config.localModel = await input({ message: 'Enter local model name manually:', default: 'llama3' });
+                    }
+                } catch (e) {
+                    spinner.stop();
+                    console.log(chalk.yellow('⚠️  Could not connect to Ollama automatically. Is it running?'));
+                    config.localUrl = await input({ message: 'Enter Ollama API URL:', default: config.localUrl });
+                    config.localModel = await input({ message: 'Enter local model name:', default: config.localModel });
+                }
+            } else {
+                config.localUrl = await input({ message: 'Enter custom API URL:', default: config.localUrl });
+                config.localModel = await input({ message: 'Enter local model name:', default: config.localModel });
+            }
+
             config.isSetup = true; // Mark as setup
             saveConfig(config);
             console.log(chalk.green('✓ Local LLM configured and saved locally!\n'));
