@@ -732,7 +732,7 @@ async function showMainMenu() {
         } else if (choice === 'update') {
             updateOops();
         } else if (choice === 'ci') {
-            generateCiCdPipeline();
+            await generateCiCdPipeline();
         } else if (choice === 'help') {
              console.log(tealGradient('\n━━━━━━━━━ Oops Help ━━━━━━━━━'));
              console.log(chalk.white('Oops is an AI Code Review Assistant that prevents you from pushing bad code.'));
@@ -777,13 +777,22 @@ function updateOops() {
     }
 }
 
-function generateCiCdPipeline() {
-    const workflowsDir = path.join(process.cwd(), '.github', 'workflows');
-    if (!fs.existsSync(workflowsDir)) {
-        fs.mkdirSync(workflowsDir, { recursive: true });
-    }
-    
-    const ymlContent = `name: Oops Security Scan
+async function generateCiCdPipeline() {
+    const platform = await select({
+        message: 'Which CI/CD platform do you use?',
+        choices: [
+            { name: 'GitHub Actions', value: 'github' },
+            { name: 'GitLab CI', value: 'gitlab' }
+        ]
+    });
+
+    if (platform === 'github') {
+        const workflowsDir = path.join(process.cwd(), '.github', 'workflows');
+        if (!fs.existsSync(workflowsDir)) {
+            fs.mkdirSync(workflowsDir, { recursive: true });
+        }
+        
+        const ymlContent = `name: Oops Security Scan
 
 on:
   pull_request:
@@ -807,12 +816,30 @@ jobs:
       - name: Run Deep Project Scan
         run: oops scan
 `;
+        
+        const targetFile = path.join(workflowsDir, 'oops-security.yml');
+        fs.writeFileSync(targetFile, ymlContent, 'utf8');
+        
+        console.log(chalk.green(`\n✓ CI/CD Pipeline successfully generated at `) + chalk.cyan('.github/workflows/oops-security.yml'));
+    } else if (platform === 'gitlab') {
+        const ymlContent = `stages:
+  - security-scan
+
+oops-security-scan:
+  stage: security-scan
+  image: node:20
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - npm install -g https://github.com/omn7/oops.ai.git
+    - oops scan
+`;
+        const targetFile = path.join(process.cwd(), '.gitlab-ci.yml');
+        fs.writeFileSync(targetFile, ymlContent, 'utf8');
+        console.log(chalk.green(`\n✓ CI/CD Pipeline successfully generated at `) + chalk.cyan('.gitlab-ci.yml'));
+    }
     
-    const targetFile = path.join(workflowsDir, 'oops-security.yml');
-    fs.writeFileSync(targetFile, ymlContent, 'utf8');
-    
-    console.log(chalk.green(`\n✓ CI/CD Pipeline successfully generated at `) + chalk.cyan('.github/workflows/oops-security.yml'));
-    console.log(chalk.white(`Whenever someone opens a Pull Request, Oops will automatically scan the project!\n`));
+    console.log(chalk.white(`Whenever someone opens a Pull/Merge Request, Oops will automatically scan the project!\n`));
 }
 
 async function main() {
@@ -827,7 +854,7 @@ async function main() {
     } else if (command === 'update') {
         updateOops();
     } else if (command === 'setup-ci') {
-        generateCiCdPipeline();
+        await generateCiCdPipeline();
     } else if (command === 'start') {
         printHeader();
         await showMainMenu();
