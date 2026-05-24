@@ -219,7 +219,7 @@ async function executeHybridAIReview(files, config) {
     if (!combinedContent.trim()) return;
 
     const spinner = ora({ text: tealGradient('AI is deeply analyzing flagged files...'), color: 'cyan' }).start();
-    const prompt = `You are an expert AI code reviewer. The local static scanner flagged the following files for potential vulnerabilities. Please perform a deep architectural review and provide fixes for these specific files.
+    const prompt = `You are an expert AI code reviewer. The local static scanner flagged the following files for potential vulnerabilities. Please perform a deep architectural review. Specifically look for security flaws, code smells, and performance bottlenecks, and provide fixes for these specific files.
 CRITICAL INSTRUCTION: You MUST return a strict JSON response in EXACTLY this format, and absolutely nothing else. Do not use markdown blocks, just raw JSON:
 {
   "fixes": [
@@ -344,7 +344,7 @@ async function runApiReview(diff, config) {
     }).start();
 
     try {
-        const prompt = `Review the following git diff for logical security flaws (e.g. SQL injection, exposed internal paths, bad architecture). Be incredibly concise. If it looks secure, just reply "Looks good". If there are issues, list them briefly.\n\n${diff}`;
+        const prompt = `Review the following git diff for logical security flaws, code smells, and performance bottlenecks (e.g. SQL injection, O(N^2) loops, exposed internal paths, bad architecture). Be incredibly concise. If it looks secure and performant, just reply "Looks good". If there are issues, list them briefly.\n\n${diff}`;
         let text = '';
 
         if (config.apiProvider === 'gemini' || config.llmType === 'gemini') {
@@ -411,7 +411,7 @@ async function runOllamaReview(diff, url, model) {
     }).start();
 
     try {
-        const prompt = `Review the following git diff for logical security flaws. Be incredibly concise. If it looks secure, just reply "Looks good". If there are issues, list them briefly.\n\n${diff}`;
+        const prompt = `Review the following git diff for logical security flaws, code smells, and performance bottlenecks. Be incredibly concise. If it looks secure and performant, just reply "Looks good". If there are issues, list them briefly.\n\n${diff}`;
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
