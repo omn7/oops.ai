@@ -206,6 +206,18 @@ async function runDeepProjectScan(config) {
     }
 }
 
+function getCustomRules() {
+    const rulesPathMd = path.join(process.cwd(), '.oops-rules.md');
+    const rulesPathTxt = path.join(process.cwd(), '.oops-rules.txt');
+    if (fs.existsSync(rulesPathMd)) {
+        return fs.readFileSync(rulesPathMd, 'utf8');
+    }
+    if (fs.existsSync(rulesPathTxt)) {
+        return fs.readFileSync(rulesPathTxt, 'utf8');
+    }
+    return null;
+}
+
 async function executeHybridAIReview(files, config) {
     let combinedContent = '';
     for (const file of files) {
@@ -219,8 +231,12 @@ async function executeHybridAIReview(files, config) {
     if (!combinedContent.trim()) return;
 
     const spinner = ora({ text: tealGradient('AI is deeply analyzing flagged files...'), color: 'cyan' }).start();
-    const prompt = `You are an expert AI code reviewer. The local static scanner flagged the following files for potential vulnerabilities. Please perform a deep architectural review. Specifically look for security flaws, code smells, and performance bottlenecks, and provide fixes for these specific files.
-CRITICAL INSTRUCTION: You MUST return a strict JSON response in EXACTLY this format, and absolutely nothing else. Do not use markdown blocks, just raw JSON:
+    let prompt = `You are an expert AI code reviewer. The local static scanner flagged the following files for potential vulnerabilities. Please perform a deep architectural review. Specifically look for security flaws, code smells, and performance bottlenecks, and provide fixes for these specific files.`;
+    const rules = getCustomRules();
+    if (rules) {
+        prompt += `\n\nCRITICAL: You MUST strictly adhere to the following company coding guidelines when generating fixes:\n<company_rules>\n${rules}\n</company_rules>\n`;
+    }
+    prompt += `\nCRITICAL INSTRUCTION: You MUST return a strict JSON response in EXACTLY this format, and absolutely nothing else. Do not use markdown blocks, just raw JSON:
 {
   "fixes": [
     {
@@ -344,7 +360,12 @@ async function runApiReview(diff, config) {
     }).start();
 
     try {
-        const prompt = `Review the following git diff for logical security flaws, code smells, and performance bottlenecks (e.g. SQL injection, O(N^2) loops, exposed internal paths, bad architecture). Be incredibly concise. If it looks secure and performant, just reply "Looks good". If there are issues, list them briefly.\n\n${diff}`;
+        let prompt = `Review the following git diff for logical security flaws, code smells, and performance bottlenecks (e.g. SQL injection, O(N^2) loops, exposed internal paths, bad architecture). Be incredibly concise. If it looks secure and performant, just reply "Looks good". If there are issues, list them briefly.\n\n${diff}`;
+        const rules = getCustomRules();
+        if (rules) {
+            prompt += `\n\nCRITICAL COMPANY GUIDELINES TO ENFORCE:\n<company_rules>\n${rules}\n</company_rules>\n`;
+            spinner.text = tealGradient('Analyzing diff with company rules injected...');
+        }
         let text = '';
 
         if (config.apiProvider === 'gemini' || config.llmType === 'gemini') {
@@ -411,7 +432,12 @@ async function runOllamaReview(diff, url, model) {
     }).start();
 
     try {
-        const prompt = `Review the following git diff for logical security flaws, code smells, and performance bottlenecks. Be incredibly concise. If it looks secure and performant, just reply "Looks good". If there are issues, list them briefly.\n\n${diff}`;
+        let prompt = `Review the following git diff for logical security flaws, code smells, and performance bottlenecks. Be incredibly concise. If it looks secure and performant, just reply "Looks good". If there are issues, list them briefly.\n\n${diff}`;
+        const rules = getCustomRules();
+        if (rules) {
+            prompt += `\n\nCRITICAL COMPANY GUIDELINES TO ENFORCE:\n<company_rules>\n${rules}\n</company_rules>\n`;
+            spinner.text = tealGradient(`Analyzing diff with local model (${model}) and company rules...`);
+        }
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -448,7 +474,12 @@ async function runOllamaReview(diff, url, model) {
 
 async function generateFix(diff, feedback, config) {
     const spinner = ora({ text: tealGradient('Generating fix...'), color: 'cyan' }).start();
-    const prompt = `You are an expert AI coding assistant. The user has the following git diff which has security or code quality issues:\n\n${diff}\n\nThe issues identified are:\n${feedback}\n\nPlease provide the exact code changes or a brief explanation of how to fix these issues. Provide code snippets to show the corrected implementation.`;
+    let prompt = `You are an expert AI coding assistant. The user has the following git diff which has security or code quality issues:\n\n${diff}\n\nThe issues identified are:\n${feedback}\n\nPlease provide the exact code changes or a brief explanation of how to fix these issues. Provide code snippets to show the corrected implementation.`;
+    const rules = getCustomRules();
+    if (rules) {
+        prompt += `\n\nCRITICAL: You MUST strictly adhere to the following company coding guidelines when generating fixes:\n<company_rules>\n${rules}\n</company_rules>\n`;
+        console.log(chalk.magenta('\n↳ 📖 Custom company rules injected into AI context.'));
+    }
 
     try {
         let fixContent = '';
